@@ -1,0 +1,61 @@
+
+import os
+import asyncio
+import logging
+from collections import defaultdict, deque
+
+from aiogram import Bot, Dispatcher, F
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message
+from openai import AsyncOpenAI
+
+bot = Bot(token=os.environ["TELEGRAM_BOT_TOKEN"])
+dp = Dispatcher()
+ai = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+histories = defaultdict(lambda: deque(maxlen=20))
+
+@dp.message(CommandStart())
+async def start(message: Message):
+    await message.answer(
+        "Assalomu alaykum! Men Ibrohim AI 🤖\n"
+        "Menga istalgan savolingizni yozing!"
+    )
+
+@dp.message(Command("reset"))
+async def reset(message: Message):
+    histories.pop(message.from_user.id, None)
+    await message.answer("Suhbat tozalandi!")
+
+@dp.message(F.text)
+async def chat(message: Message):
+    history = histories[message.from_user.id]
+    history.append({"role": "user", "content": message.text})
+
+    try:
+        await bot.send_chat_action(message.chat.id, "typing")
+        result = await ai.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content":
+                 "Sen Ibrohim AI nomli aqlli yordamchisan. "
+                 "Foydalanuvchiga uning tilida javob ber."},
+                *list(history)
+            ]
+        )
+        answer = result.choices[0].message.content
+        history.append({"role": "assistant", "content": answer})
+
+        for i in range(0, len(answer), 4000):
+            await message.answer(answer[i:i+4000])
+
+    except Exception:
+        logging.exception("AI error")
+        await message.answer("Xatolik yuz berdi. Qayta urinib ko‘ring.")
+
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())
